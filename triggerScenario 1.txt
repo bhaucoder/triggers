@@ -1,0 +1,70 @@
+---------------------------------------------------------------------------------------------------------------------------------------
+Write a Trigger for below scenario:
+1. There is a field NumberOfAccount__c on User
+2. Above field on User should be updated every time account is created, 
+    and whenever a owner is updated, account id deleted & undeleted
+3. The field in step 1 indicates how many accounts a user owns.
+Please consider best practises, bulkification while writing the trigger.
+---------------------------------------------------------------------------------------------------------------------------------------
+trigger AccountTrigger on Account (after insert, after update, after delete, after undelete) {
+    if(Trigger.isAfter) {
+        if(Trigger.isInsert) {
+            AccountTriggerLogicExtension.calculateNumberOfAccountOwnedByUser(Trigger.New,NULL);
+        }
+        if(Trigger.isUpdate) {
+            AccountTriggerLogicExtension.calculateNumberOfAccountOwnedByUser(Trigger.New,Trigger.oldMap);
+        }
+        if(Trigger.isDelete) {
+            AccountTriggerLogicExtension.calculateNumberOfAccountOwnedByUser(Trigger.old,NULL);
+        }
+        if(Trigger.isUndelete) {
+            AccountTriggerLogicExtension.calculateNumberOfAccountOwnedByUser(Trigger.New,NULL);
+        }
+    }
+}
+---------------------------------------------------------------------------------------------------------------------------------------
+public class AccountTriggerLogicExtension {
+    
+    public static void calculateNumberOfAccountOwnedByUser(List<Account> accounts, Map<Id,Account> oldAccounts) {
+        List<String> userIds = new List<String>();
+        if(oldAccounts !=NULL) {
+            for(Account account:accounts) {
+                if(account.OwnerId != oldAccounts.get(account.id).OwnerId) {
+                    userIds.add(account.OwnerId);
+                    userIds.add(oldAccounts.get(account.id).OwnerId);
+                }
+            }
+        } else {
+            for(Account account:accounts) {
+                userIds.add(account.OwnerId);
+            }
+        }
+        AccountTriggerLogicExtension.updateNumberOfAccountsOwnedByAUser(userIds);
+    }
+    
+    @future
+    public static void updateNumberOfAccountsOwnedByAUser(List<String> userIdsToCheck) {
+        Map<String,Integer> mapOfUserAndNumberOfAccountTheyOwned = new Map<String,Integer>();
+        List<Account> accountsOwnedByUsers = [SELECT Id, OwnerId FROM Account WHERE OwnerId IN :userIdsToCheck];
+        for(Account account:accountsOwnedByUsers) {
+            if(mapOfUserAndNumberOfAccountTheyOwned.containsKey(account.OwnerId)) {
+                mapOfUserAndNumberOfAccountTheyOwned.put(account.OwnerId, mapOfUserAndNumberOfAccountTheyOwned.get(account.OwnerId)+1);
+            } else {
+                mapOfUserAndNumberOfAccountTheyOwned.put(account.OwnerId, 1);
+            }
+        }
+        
+        List<User> usersToUpdate = new List<User>();
+        List<User> users = [SELECT Id, NumberOfAccounts__c FROM User WHERE Id IN :userIdsToCheck];
+        for(User user:users) {
+            user.NumberOfAccounts__c = mapOfUserAndNumberOfAccountTheyOwned.get(user.Id);
+            usersToUpdate.add(user);
+        }
+        
+        if(usersToUpdate.size() >0) {
+            update usersToUpdate;
+        }
+    }
+    
+}
+---------------------------------------------------------------------------------------------------------------------------------------
